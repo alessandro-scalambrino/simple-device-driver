@@ -1,0 +1,91 @@
+# .gitlab-ci.yml
+
+# Define the stages of the CI pipeline
+stages:
+  - build
+  - test
+
+build:
+  image: ubuntu:22.04  
+  stage: build
+  before_script:
+    - apt-get update
+    - apt-get install -y build-essential linux-headers-$(uname -r) linux-image-$(uname -r) kmod
+    - uname -r
+  script:
+    - make all
+  artifacts:
+    paths:
+      - simple_char_driver.ko  
+    expire_in: 1 week
+
+test:
+  image: ubuntu:22.04
+  stage: test
+  dependencies:
+    - build
+  before_script:
+    - apt-get update
+    - apt-get install -y build-essential linux-headers-$(uname -r) linux-image-$(uname -r) kmod
+    - uname -r
+  script:
+    # Unload the kernel module if it exists
+    - |
+      if lsmod | grep "simple_char_driver"; then
+        rmmod simple_char_driver
+        echo "Unloaded simple_char_driver module."
+      else
+        echo "Module simple_char_driver not loaded."
+      fi
+
+    # Load the kernel module
+    - insmod simple_char_driver.ko
+    - dmesg | tail -n 20
+
+    # Test write message and read
+    - echo "hello driver" > /dev/pcd
+    - cat /dev/pcd
+
+    # Test oversized write (expect this to fail)
+    - dd if=/dev/zero of=large_file.txt bs=1M count=600
+    
+    # Attempt to copy the large file to the device
+    - |
+      cp large_file.txt /dev/pcd || {
+        echo "Write failed as expected (file too large)";
+        write_failed=true;  
+      }
+
+    # Check if the previous command failed as expected
+    - |
+      if [ "${write_failed}" != true ]; then
+        echo "Unexpected success on oversized write, failing the pipeline";
+        exit 1; 
+      fi
+
+    # Test successful write with a smaller file
+    - echo "Lorem ipsum" > small_file.txt
+    - cp small_file.txt /dev/pcd
+    - cat /dev/pcd
+
+    # Test lseek
+    - echo "abcdefghij" > /dev/pcd
+    - cat /dev/pcd
+    - output1=$(dd if=/dev/pcd bs=1 count=5 skip=0 2>/dev/null)
+    - |
+      if [ "$output1" != "abcde" ]; then
+        echo "First read failed: expected 'abcde', got '$output1'";
+        exit 1;  
+      fi
+
+    - output2=$(dd if=/dev/pcd bs=1 count=3 skip=5 2>/dev/null)
+    - |
+      if [ "$output2" != "fgh" ]; then
+        echo "Second read failed: expected 'fgh', got '$output2'";
+        exit 1;  
+      fi
+      
+    # Unload the kernel module
+    - rmmod simple_char_driver.ko
+    - dmesg | tail -n 20
+
