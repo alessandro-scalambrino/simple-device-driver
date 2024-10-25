@@ -12,10 +12,10 @@
 
 char device_buffer[DEV_MEM_SIZE]; /* Buffer for the device */
 
-// Device number 
+/* Device number */
 dev_t device_number;
 
-// VFS registration variables
+/* VFS registration variables */
 struct cdev pcd_cdev;
 
 // Struct file_operations from linKern
